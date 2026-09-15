@@ -27,6 +27,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "start:host": "npx prisma migrate deploy && npm run build && npm start",
     "deploy:commands": "node dist/deploy-commands.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",

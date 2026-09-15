@@ -152,6 +152,34 @@ Notes:
 - All critical state lives in Supabase; restarts recover via scheduler catch-up tick.
 - No local permanent storage, no extra services.
 
+## Waifly deployment (free, no credit card)
+
+Waifly's free plan (300MB RAM / 1GB disk / 30% CPU, Pterodactyl panel, no sleep)
+fits Civitas, which targets ~100MB RSS. The Supabase database stays as-is;
+Waifly's included MySQL is not used.
+
+1. Sign up at `https://dash.waifly.com` (Discord/Google/Apple, no card).
+2. Servers → Create → **NodeJS** egg, **FR2 (Paris)** location, default free limits.
+3. Confirm the egg's Node version is **≥18** (ask support or check the Docker
+   image list if unsure) — abort here if it isn't.
+4. Upload the project via Files or SFTP, **excluding**
+   `node_modules/`, `.git/`, `.env`, `dist/`.
+5. In Files, create `.env` with the 4 production values (`DISCORD_TOKEN`,
+   `DISCORD_CLIENT_ID`, `DATABASE_URL` session pooler, `NODE_ENV=production`).
+6. Startup tab, single command:
+   `npm install --no-audit --no-fund && npm run start:host`
+   (`start:host` = `prisma migrate deploy` + build + start; no-op when synced.)
+   If boots feel slow on 30% CPU, use the conditional install instead:
+   `if [ ! -d node_modules ]; then npm install --no-audit --no-fund; fi && npm run start:host`
+7. Start, then expect in the console: `Database connected` →
+   `Civitas ready as …`. A `P1001` here means blocked egress — try port 6543
+   with `?pgbouncer=true` before giving up.
+8. Enable **auto-restart** (a server offline 3 days is suspended), check RAM
+   stays under ~250MB, then validate with `/tutorial` and a test `/vote`.
+
+Rules that matter: one account per person, no VPN/proxy/tunnel on free servers,
+keep the bot online from day one (new accounts have an extra 3/7-day rule).
+
 ## Bot permissions
 
 Least privilege: **Manage Roles** (role sync), **Send Messages**, **Embed Links**, **Read Message History**, **Use Application Commands**, **View Channels**. Never requires Administrator. Every role change verifies hierarchy + manageability and fails safely with audit (`role.sync_fail`).
