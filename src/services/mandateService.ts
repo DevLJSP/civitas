@@ -23,6 +23,7 @@ export async function createAppointmentMandate(opts: {
   });
   if (holders >= position.maxHolders) throw userError('This position has no free seats.');
 
+  // Bounded so one slow tx can't pin a pool connection (P2024). DB-only body.
   return prisma.$transaction(async (tx) => {
     const existing = await tx.mandate.count({
       where: { positionId: opts.positionId, userId: opts.userId, status: { in: ['ACTIVE', 'PROBATION', 'PENDING'] } },
@@ -62,7 +63,7 @@ export async function createAppointmentMandate(opts: {
       data: { guildId: opts.guildId, actorId: opts.appointedBy, action: AUDIT_ACTIONS.APPOINTMENT_CREATE, entityType: 'Mandate', entityId: mandate.id, details: { positionId: opts.positionId, userId: opts.userId } as object },
     });
     return mandate;
-  });
+  }, { maxWait: 3000, timeout: 10000 });
 }
 
 export async function endMandate(opts: {
@@ -72,6 +73,7 @@ export async function endMandate(opts: {
   status: MandateStatus;
   reason?: string;
 }) {
+  // Bounded so one slow tx can't pin a pool connection (P2024). DB-only body.
   return prisma.$transaction(async (tx) => {
     const mandate = await tx.mandate.findFirst({ where: { id: opts.mandateId, guildId: opts.guildId } });
     if (!mandate) throw userError('Mandate not found.');
@@ -86,7 +88,7 @@ export async function endMandate(opts: {
       data: { guildId: opts.guildId, actorId: opts.actorId, action: AUDIT_ACTIONS.MANDATE_END, entityType: 'Mandate', entityId: mandate.id, details: { status: opts.status, reason: opts.reason } as object },
     });
     return updated;
-  });
+  }, { maxWait: 3000, timeout: 10000 });
 }
 
 export async function decideProbation(opts: {

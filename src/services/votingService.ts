@@ -55,6 +55,7 @@ export async function castVote(opts: {
   // roles before calling here; eligibleCount snapshot is used for quorum.
 
   try {
+    // Bounded so one slow tx can't pin a pool connection (P2024). DB-only body.
     await prisma.$transaction(async (tx) => {
       // Receipt first: unique constraint guarantees single ballot even under concurrency.
       await tx.electionVoterReceipt.create({
@@ -83,7 +84,7 @@ export async function castVote(opts: {
           },
         });
       }
-    });
+    }, { maxWait: 3000, timeout: 10000 });
   } catch (e) {
     if (e instanceof Error && (/Unique constraint|P2002/i.test(e.message))) {
       throw userError('You have already voted.', 'DUPLICATE_VOTE');

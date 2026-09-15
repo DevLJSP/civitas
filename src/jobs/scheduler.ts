@@ -3,12 +3,22 @@ import { prisma } from '../database/prisma.js';
 import { finalizeElection } from '../services/electionService.js';
 import { closeProposal } from '../services/proposalService.js';
 import { decideImpeachment } from '../services/impeachmentService.js';
-import { claimDueTasks, completeTask, failTask, newLockOwner } from '../services/schedulerService.js';
+import { claimDueTasks, completeTask, failTask, isTransientDbError, newLockOwner } from '../services/schedulerService.js';
 import { LIMITS } from '../config/constants.js';
 import { logger } from '../utils/logger.js';
 
 let started = false;
 let lockOwner = '';
+let tickInFlight = false;
+let pollTimer: NodeJS.Timeout | undefined;
+let keepaliveTimer: NodeJS.Timeout | undefined;
+let consecutivePoolErrors = 0;
+
+const BASE_POLL_MS = LIMITS.schedulerPollMs;
+const MAX_BACKOFF_MS = 5 * 60_000;
+// Keep one connection warm well inside Prisma's 5-min idle lifetime so a tiny
+// host never has to rebuild the whole TLS pool at once (P2024 storm).
+const KEEPALIVE_MS = 4 * 60_000;
 
 interface TaskPayload {
   guildId?: string;
@@ -89,9 +99,24 @@ async function handleTask(client: Client, type: string, payload: TaskPayload): P
   }
 }
 
+function scheduleNext(client: Client, delayMs: number): void {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(() => void tick(client), delayMs);
+  pollTimer.unref?.();
+}
+
 async function tick(client: Client): Promise<void> {
+  // Single-flight: a slow tick must never overlap the next one, otherwise
+  // concurrent claim loops pile up pool checkouts until P2024.
+  if (tickInFlight) {
+    logger.warn('Scheduler tick skipped (previous tick still running)');
+    scheduleNext(client, BASE_POLL_MS);
+    return;
+  }
+  tickInFlight = true;
   try {
     const tasks = await claimDueTasks(lockOwner);
+    consecutivePoolErrors = 0;
     for (const task of tasks) {
       try {
         await handleTask(client, task.type, (task.payload ?? {}) as TaskPayload);
@@ -101,7 +126,26 @@ async function tick(client: Client): Promise<void> {
       }
     }
   } catch (err) {
+    if (isTransientDbError(err)) {
+      // Pool pressure: back off exponentially instead of hammering every 30s.
+      consecutivePoolErrors += 1;
+      const backoff = Math.min(MAX_BACKOFF_MS, BASE_POLL_MS * 2 ** (consecutivePoolErrors - 1));
+      logger.error(`Scheduler tick failed (pool pressure, retry in ${Math.round(backoff / 1000)}s)`, err);
+      tickInFlight = false;
+      scheduleNext(client, backoff);
+      return;
+    }
     logger.error('Scheduler tick failed', err);
+  }
+  tickInFlight = false;
+  scheduleNext(client, BASE_POLL_MS);
+}
+
+async function keepalive(): Promise<void> {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+  } catch (err) {
+    logger.warn('Scheduler keepalive query failed', err);
   }
 }
 
@@ -110,11 +154,18 @@ export function startScheduler(client: Client): void {
   started = true;
   lockOwner = newLockOwner();
   logger.info(`Scheduler started (owner=${lockOwner})`);
-  // Immediate recovery pass for missed tasks during downtime, then interval.
+  // Immediate recovery pass for missed tasks during downtime, then chained polls.
   void tick(client);
-  setInterval(() => void tick(client), LIMITS.schedulerPollMs).unref?.();
+  keepaliveTimer = setInterval(() => void keepalive(), KEEPALIVE_MS);
+  keepaliveTimer.unref?.();
 }
 
 export function _resetSchedulerForTests(): void {
   started = false;
+  tickInFlight = false;
+  consecutivePoolErrors = 0;
+  if (pollTimer) clearTimeout(pollTimer);
+  if (keepaliveTimer) clearInterval(keepaliveTimer);
+  pollTimer = undefined;
+  keepaliveTimer = undefined;
 }

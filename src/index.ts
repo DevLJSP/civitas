@@ -4,7 +4,7 @@ import { logger } from './utils/logger.js';
 import { registerReady } from './events/ready.js';
 import { registerInteractionCreate } from './events/interactionCreate.js';
 import { registerGuildEvents } from './events/guild.js';
-import { prisma } from './database/prisma.js';
+import { prisma, describePoolConfig, checkDbConnection } from './database/prisma.js';
 
 async function main(): Promise<void> {
   const env = getEnv();
@@ -12,7 +12,13 @@ async function main(): Promise<void> {
 
   // Fail fast if the database is unreachable.
   await prisma.$connect();
-  logger.info('Database connected');
+  logger.info(`Database connected (${describePoolConfig()})`);
+  try {
+    await checkDbConnection();
+  } catch (err) {
+    logger.error('Database health check failed (verify DATABASE_URL pooler params vs DIRECT_URL usage)', err);
+    throw err;
+  }
 
   const client = new Client({
     intents: [

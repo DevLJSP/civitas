@@ -58,6 +58,7 @@ export async function voteImpeachment(guildId: string, impeachmentId: string, vo
 }
 
 export async function decideImpeachment(guildId: string, impeachmentId: string, actorId: string, remove: boolean) {
+  // Bounded so one slow tx can't pin a pool connection (P2024). DB-only body.
   return prisma.$transaction(async (tx) => {
     const imp = await tx.impeachment.findFirst({ where: { id: impeachmentId, guildId } });
     if (!imp) throw userError('Removal case not found.');
@@ -88,7 +89,7 @@ export async function decideImpeachment(guildId: string, impeachmentId: string, 
       }
     }
     return updated;
-  });
+  }, { maxWait: 3000, timeout: 10000 });
 }
 
 /** Admin shortcut that also triggers succession via service (non-transactional wrapper). */

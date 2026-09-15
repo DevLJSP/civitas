@@ -80,7 +80,8 @@ npm run dev
 |-----|----------|-------------|
 | `DISCORD_TOKEN` | yes | Bot token (Developer Portal → Bot) |
 | `DISCORD_CLIENT_ID` | yes | Application client id |
-| `DATABASE_URL` | yes | Supabase Postgres connection string (`...?pgbouncer=true` works; use direct for migrations) |
+| `DATABASE_URL` | yes | Pooled runtime connection (Supabase session pooler, port 5432) with `?pgbouncer=true&connection_limit=5&pool_timeout=20&connect_timeout=10`. Keep `connection_limit` small (5 for a single bot instance) — an untuned default (e.g. 81) exhausts Supabase and causes P2024 pool timeouts after hours online. |
+| `DIRECT_URL` | yes | Direct connection (Supabase dashboard → Database settings, `db.<ref>` host, port 5432, no pooler flags) used only by `prisma migrate deploy`. |
 | `NODE_ENV` | no | `production` (default) |
 | `GUILD_ID` | no | Dev guild for instant command refresh |
 | `LOG_LEVEL` | no | `debug`/`info`/`warn`/`error` |
@@ -99,11 +100,22 @@ Never commit `.env`. Never log secrets (logger redacts tokens/URLs).
 ## Prisma + Supabase setup
 
 1. Create a Supabase project → Project Settings → Database → copy **Connection string** (URI).
-2. Set `DATABASE_URL` in `.env`.
-3. `npx prisma generate`
-4. `npx prisma migrate dev --name init` (local) — creates all tables.
-5. Production: `npx prisma migrate deploy`.
-6. Start: `npm run build && npm start`.
+2. Set `DATABASE_URL` in `.env` to the **session pooler** URL (port 5432) plus pool tuning:
+   `?pgbouncer=true&connection_limit=5&pool_timeout=20&connect_timeout=10`.
+3. Set `DIRECT_URL` in `.env` to the **direct** connection (host `db.<ref>.supabase.co`, port 5432) — used only for migrations.
+4. `npx prisma generate`
+5. `npx prisma migrate dev --name init` (local) — creates all tables.
+6. Production: `npx prisma migrate deploy` (uses `DIRECT_URL`).
+7. Start: `npm run build && npm start`.
+
+Supabase is used **only as Postgres**. No Edge Functions / Realtime required.
+
+> Pool notes: the bot is a single long-lived process, so `connection_limit=5`
+> is plenty. Raising it toward Supabase's max only moves exhaustion server-side
+> and surfaces as `P2024 ... pool timeout` after hours online. The scheduler
+> claims tasks atomically (`SKIP LOCKED`), never overlaps ticks, backs off on
+> pool-pressure errors, and fails deterministic task errors (e.g. starting an
+> election with no candidates) immediately instead of retrying every 60s.
 
 Supabase is used **only as Postgres**. No Edge Functions / Realtime required.
 

@@ -120,6 +120,7 @@ export async function startElection(guildId: string, electionId: string, actorId
 
 /** Finalize an election atomically. Idempotent: second call returns current state. */
 export async function finalizeElection(guildId: string, electionId: string, actorId: string) {
+  // Bounded so one slow tx can't pin a pool connection (P2024). DB-only body.
   return prisma.$transaction(async (tx) => {
     const election = await tx.election.findFirst({ where: { id: electionId, guildId } });
     if (!election) throw userError('Election not found.');
@@ -215,7 +216,7 @@ export async function finalizeElection(guildId: string, electionId: string, acto
       },
     });
     return updated;
-  });
+  }, { maxWait: 5000, timeout: 15000 });
 }
 
 export async function cancelElection(guildId: string, electionId: string, actorId: string) {

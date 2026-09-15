@@ -13,6 +13,7 @@ jobs:
     # Tests are DB-free by design, so no real database is needed in CI.
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/civitas
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/civitas
     steps:
       - uses: actions/checkout@v4
 
