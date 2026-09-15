@@ -1,0 +1,635 @@
+// Civitas — Supabase PostgreSQL schema via Prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum SelectionMethod {
+  ELECTION
+  APPOINTMENT
+  EITHER
+}
+
+enum ElectionType {
+  MAJORITY
+  APPROVAL
+  RANKED
+}
+
+enum ElectionStatus {
+  DRAFT
+  SCHEDULED
+  NOMINATIONS
+  CAMPAIGNING
+  ACTIVE
+  COUNTING
+  FINISHED
+  CANCELLED
+  QUORUM_NOT_REACHED
+}
+
+enum MandateStatus {
+  PENDING
+  PROBATION
+  ACTIVE
+  EXPIRED
+  RESIGNED
+  REMOVED
+  SUSPENDED
+}
+
+enum MandateOrigin {
+  ELECTION
+  APPOINTMENT
+  SUCCESSION
+  PROMOTION
+}
+
+enum PromotionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+  CANCELLED
+}
+
+enum ProposalStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+  CANCELLED
+}
+
+enum ProposalType {
+  MAJORITY
+  APPROVAL
+}
+
+enum ImpeachmentStatus {
+  OPEN
+  VOTING
+  PASSED
+  FAILED
+  CANCELLED
+}
+
+enum ImpeachmentMethod {
+  ADMIN
+  COUNCIL
+  COMMUNITY
+}
+
+enum SuccessionAction {
+  APPOINT_SUCCESSOR
+  OPEN_APPLICATIONS
+  START_ELECTION
+  CREATE_VACANCY
+}
+
+enum VacancyStatus {
+  OPEN
+  IN_PROGRESS
+  FILLED
+  CANCELLED
+}
+
+enum TaskStatus {
+  PENDING
+  CLAIMED
+  DONE
+  FAILED
+}
+
+// ---------- Core ----------
+
+model User {
+  id        String   @id // Discord user id
+  username  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Guild {
+  id        String    @id // Discord guild id
+  name      String?
+  icon      String?
+  joinedAt  DateTime  @default(now())
+  leftAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  config    GuildConfig?
+  members   GuildMember[]
+  positions LeadershipPosition[]
+}
+
+model GuildConfig {
+  id                   String   @id @default(cuid())
+  guildId              String   @unique
+  guild                Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  leadershipCategoryId String?
+  applicationsChannelId String?
+  electionChannelId    String?
+  announcementChannelId String?
+  auditChannelId       String?
+
+  managerRoleIds       String[] @default([])
+  voterRoleIds         String[] @default([])
+  councilRoleIds       String[] @default([])
+
+  defaultMandateDays   Int      @default(90)
+  defaultProbationDays Int      @default(30)
+  defaultQuorumPercent Float    @default(20)
+  timezone             String   @default("UTC")
+  governanceModel      String   @default("ADMIN")
+  minAccountAgeDays    Int      @default(0)
+  minMembershipDays    Int      @default(0)
+  locale               String   @default("en")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model GuildMember {
+  id           String    @id @default(cuid())
+  guildId      String
+  guild        Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  userId       String
+  joinedAt     DateTime?
+  messageCount Int       @default(0)
+  activeDays   Int       @default(0)
+  lastActiveAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([guildId, userId])
+  @@index([guildId])
+  @@index([userId])
+}
+
+// ---------- Positions ----------
+
+model LeadershipPosition {
+  id                  String          @id @default(cuid())
+  guildId             String
+  guild               Guild           @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  name                String
+  description         String?
+  roleId              String?
+  seats               Int             @default(1)
+  selectionMethod     SelectionMethod @default(EITHER)
+  termLengthDays      Int             @default(90)
+  probationDays       Int             @default(0)
+  minAccountAgeDays   Int?
+  minMembershipDays   Int?
+  minActivity         Int?
+  maxHolders          Int             @default(1)
+  reelectionLimit     Int             @default(0)
+  requireElection     Boolean         @default(true)
+  allowAppointment    Boolean         @default(true)
+  successionEnabled   Boolean         @default(true)
+
+  parentId            String?
+  parent              LeadershipPosition?  @relation("PositionHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children            LeadershipPosition[] @relation("PositionHierarchy")
+
+  isActive            Boolean         @default(true)
+  createdBy           String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  questions           PositionQuestion[]
+  applications        LeadershipApplication[]
+  mandates            Mandate[]
+  successionPlan      SuccessionPlan?
+  vacancies           Vacancy[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+  @@index([guildId, isActive])
+  @@index([parentId])
+}
+
+model PositionQuestion {
+  id         String             @id @default(cuid())
+  guildId    String
+  positionId String
+  position   LeadershipPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  label      String
+  placeholder String?
+  required   Boolean            @default(true)
+  sortOrder  Int                @default(0)
+  createdAt  DateTime           @default(now())
+
+  @@index([positionId])
+}
+
+// ---------- Applications & candidates ----------
+
+model LeadershipApplication {
+  id          String            @id @default(cuid())
+  guildId     String
+  positionId  String
+  position    LeadershipPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  applicantId String
+  status      ApplicationStatus @default(SUBMITTED)
+  motivation  String?
+  experience  String?
+  activity    String?
+  availability String?
+  answers     Json?
+  reviewerId  String?
+  reviewNote  String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([guildId, status])
+  @@index([positionId, status])
+  @@index([applicantId])
+}
+
+model LeadershipCandidate {
+  id                String   @id @default(cuid())
+  guildId           String
+  positionId        String?
+  electionId        String?
+  election          Election? @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  applicationId     String?
+  userId            String
+  displayName       String
+  manifesto         String?
+  experience        String?
+  imageUrl          String?
+  eligibilityStatus String   @default("PENDING")
+  approved          Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([electionId])
+  @@index([guildId])
+}
+
+// ---------- Elections ----------
+
+model Election {
+  id               String         @id @default(cuid())
+  guildId          String
+  positionId       String?
+  title            String
+  description      String?
+  type             ElectionType   @default(MAJORITY)
+  status           ElectionStatus @default(DRAFT)
+  isAnonymous      Boolean        @default(false)
+  seats            Int            @default(1)
+  quorumPercent    Float          @default(20)
+  eligibleRoleIds  String[]       @default([])
+  startsAt         DateTime?
+  endsAt           DateTime?
+  nominationsEndsAt DateTime?
+  campaignEndsAt   DateTime?
+  messageId        String?
+  channelId        String?
+  createdBy        String
+  winners          Json?
+  turnout          Int            @default(0)
+  eligibleCount    Int            @default(0)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  candidates ElectionCandidate[]
+  candidateProfiles LeadershipCandidate[]
+  votes      ElectionVote[]
+  receipts   ElectionVoterReceipt[]
+
+  @@index([guildId, status])
+  @@index([guildId])
+}
+
+model ElectionCandidate {
+  id         String   @id @default(cuid())
+  electionId String
+  election   Election @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  userId     String
+  displayName String
+  manifesto  String?
+  createdAt  DateTime @default(now())
+
+  @@unique([electionId, userId])
+  @@index([electionId])
+}
+
+model ElectionVote {
+  id          String   @id @default(cuid())
+  guildId     String
+  electionId  String
+  election    Election @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  // voterId is NULL for anonymous ballots (receipt table holds the voter link).
+  voterId     String?
+  candidateId String?
+  approvals   String[] @default([])
+  rankings    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([electionId])
+  @@index([guildId])
+}
+
+// One receipt per voter per election. Enforces one-person-one-ballot atomically,
+// including for anonymous elections where ElectionVote.voterId is NULL.
+model ElectionVoterReceipt {
+  id         String   @id @default(cuid())
+  electionId String
+  election   Election @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  voterId    String
+  createdAt  DateTime @default(now())
+
+  @@unique([electionId, voterId])
+  @@index([electionId])
+}
+
+// ---------- Mandates, appointments, probation, progression ----------
+
+model Appointment {
+  id          String   @id @default(cuid())
+  guildId     String
+  positionId  String
+  userId      String
+  appointedBy String
+  reason      String?
+  mandateId   String?  @unique
+  createdAt   DateTime @default(now())
+
+  @@index([guildId])
+}
+
+model Mandate {
+  id              String        @id @default(cuid())
+  guildId         String
+  positionId      String
+  position        LeadershipPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  userId          String
+  status          MandateStatus @default(PENDING)
+  origin          MandateOrigin @default(APPOINTMENT)
+  termNumber      Int           @default(1)
+  startsAt        DateTime      @default(now())
+  endsAt          DateTime?
+  probationEndsAt DateTime?
+  probationStatus String        @default("NONE")
+  electionId      String?
+  appointmentId   String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([guildId, status])
+  @@index([guildId, userId])
+  @@index([positionId, status])
+}
+
+model Promotion {
+  id             String          @id @default(cuid())
+  guildId        String
+  fromPositionId String?
+  toPositionId   String
+  userId         String
+  status         PromotionStatus @default(PENDING)
+  requestedBy    String
+  decidedBy      String?
+  reason         String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([guildId, status])
+}
+
+model Demotion {
+  id             String          @id @default(cuid())
+  guildId        String
+  fromPositionId String
+  toPositionId   String?
+  userId         String
+  status         PromotionStatus @default(PENDING)
+  requestedBy    String
+  decidedBy      String?
+  reason         String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([guildId, status])
+}
+
+// ---------- Teams ----------
+
+model LeadershipTeam {
+  id           String   @id @default(cuid())
+  guildId      String
+  name         String
+  description  String?
+  leaderRoleId String?
+  memberRoleId String?
+  leaderUserId String?
+  createdBy    String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  members TeamMember[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+}
+
+model TeamMember {
+  id      String         @id @default(cuid())
+  teamId  String
+  team    LeadershipTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId  String
+  role    String         @default("MEMBER")
+  addedBy String?
+  createdAt DateTime     @default(now())
+
+  @@unique([teamId, userId])
+  @@index([teamId])
+}
+
+// ---------- Proposals ----------
+
+model Proposal {
+  id             String         @id @default(cuid())
+  guildId        String
+  title          String
+  description    String?
+  type           ProposalType   @default(MAJORITY)
+  status         ProposalStatus @default(DRAFT)
+  isAnonymous    Boolean        @default(false)
+  quorumPercent  Float          @default(20)
+  options        String[]       @default(["YES", "NO"])
+  startsAt       DateTime?
+  endsAt         DateTime?
+  createdBy      String
+  messageId      String?
+  channelId      String?
+  result         Json?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  votes    ProposalVote[]
+  receipts ProposalVoterReceipt[]
+
+  @@index([guildId, status])
+}
+
+model ProposalVote {
+  id         String   @id @default(cuid())
+  guildId    String
+  proposalId String
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  voterId    String?
+  option     String
+  createdAt  DateTime @default(now())
+
+  @@index([proposalId])
+}
+
+model ProposalVoterReceipt {
+  id         String   @id @default(cuid())
+  proposalId String
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  voterId    String
+  createdAt  DateTime @default(now())
+
+  @@unique([proposalId, voterId])
+  @@index([proposalId])
+}
+
+// ---------- Removal / succession / vacancies ----------
+
+model Impeachment {
+  id           String            @id @default(cuid())
+  guildId      String
+  targetUserId String
+  positionId   String?
+  mandateId    String?
+  reason       String
+  method       ImpeachmentMethod @default(ADMIN)
+  status       ImpeachmentStatus @default(OPEN)
+  openedBy     String
+  votesYes     Int               @default(0)
+  votesNo      Int               @default(0)
+  endsAt       DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  votes ImpeachmentVote[]
+
+  @@index([guildId, status])
+}
+
+model ImpeachmentVote {
+  id            String      @id @default(cuid())
+  impeachmentId String
+  impeachment   Impeachment @relation(fields: [impeachmentId], references: [id], onDelete: Cascade)
+  voterId       String
+  choice        Boolean
+  createdAt     DateTime    @default(now())
+
+  @@unique([impeachmentId, voterId])
+  @@index([impeachmentId])
+}
+
+model SuccessionPlan {
+  id                 String           @id @default(cuid())
+  guildId            String
+  positionId         String           @unique
+  position           LeadershipPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  steps              Json
+  fallbackAction     SuccessionAction @default(CREATE_VACANCY)
+  claimDeadlineHours Int              @default(48)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@index([guildId])
+}
+
+model Vacancy {
+  id               String           @id @default(cuid())
+  guildId          String
+  positionId       String
+  position         LeadershipPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  reason           String?
+  status           VacancyStatus    @default(OPEN)
+  successionAction SuccessionAction?
+  successorUserId  String?
+  deadlineAt       DateTime?
+  resolvedAt       DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@index([guildId, status])
+  @@index([positionId])
+}
+
+// ---------- Audit & scheduler ----------
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  guildId    String
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String?
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([guildId, createdAt])
+  @@index([guildId, action])
+}
+
+model ScheduledTask {
+  id        String     @id @default(cuid())
+  guildId   String?
+  type      String
+  payload   Json
+  runAt     DateTime
+  status    TaskStatus @default(PENDING)
+  attempts  Int        @default(0)
+  claimedAt DateTime?
+  lockedBy  String?
+  lastError String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([status, runAt])
+}
+
+// ---------- Tutorial ----------
+
+model TutorialState {
+  id                 String   @id @default(cuid())
+  guildId            String   @unique
+  status             String   @default("NOT_STARTED")
+  currentStep        Int      @default(1)
+  createdPositionId  String?
+  createdElectionId  String?
+  startedBy          String?
+  startedAt          DateTime @default(now())
+  completedAt        DateTime?
+  updatedAt          DateTime @updatedAt
+
+  @@index([guildId])
+}

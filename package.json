@@ -1,0 +1,59 @@
+{
+  "name": "civitas",
+  "version": "1.0.0",
+  "description": "Civitas — Leadership & Community Management System for Discord",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DevLJSP/civitas.git"
+  },
+  "homepage": "https://github.com/DevLJSP/civitas#readme",
+  "bugs": {
+    "url": "https://github.com/DevLJSP/civitas/issues"
+  },
+  "keywords": [
+    "discord",
+    "discord-bot",
+    "discord-js",
+    "community-management",
+    "governance",
+    "elections",
+    "voting",
+    "prisma",
+    "supabase"
+  ],
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "deploy:commands": "node dist/deploy-commands.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\""
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.18.0",
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.0",
+    "prettier": "^3.3.3",
+    "prisma": "^5.18.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  },
+  "license": "MIT"
+}
+
